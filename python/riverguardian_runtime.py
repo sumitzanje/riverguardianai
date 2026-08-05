@@ -30,7 +30,6 @@ from local_database import LocalDatabase
 from recommendation_engine import RecommendationEngine
 from risk_engine import RiskEngine
 from runtime_config import load_runtime_settings
-from whatsapp_sender import WhatsAppSender
 from weather_fetcher import AmbientWeatherFetcher
 from weather_fusion_engine import WeatherFusionEngine
 
@@ -154,18 +153,6 @@ class RiverGuardianRuntime:
             ),
         )
 
-        self.whatsapp_sender = WhatsAppSender(
-            enabled=bool(self.settings.get("whatsapp_enabled", False)),
-            provider=str(self.settings.get("whatsapp_provider", "TWILIO")),
-            timeout_s=int(self.settings.get("whatsapp_timeout_s", 10)),
-            twilio_account_sid=self.settings.get("twilio_account_sid"),
-            twilio_auth_token=self.settings.get("twilio_auth_token"),
-            whatsapp_from=self.settings.get("whatsapp_from"),
-            whatsapp_to=self.settings.get("whatsapp_to"),
-            webhook_url=self.settings.get("whatsapp_webhook_url"),
-            webhook_bearer_token=self.settings.get("whatsapp_webhook_bearer_token"),
-        )
-
         self.cycle_count = 0
 
     def run_forever(self) -> None:
@@ -275,14 +262,10 @@ class RiverGuardianRuntime:
 
         upload_result = self.uploader.upload(payload)
 
-        whatsapp_result = self.whatsapp_sender.send_message(
-            node_id=sensor_packet.node_id,
-            alert_type=alert_decision.alert_type,
-            message=alert_decision.message,
-        ) if alert_decision.should_send else None
-
         return {
             "cycle": self.cycle_count,
+            "device_id": str(self.settings.get("device_id", self.settings.get("node_id", "UNKNOWN"))),
+            "site_id": str(self.settings.get("site_id", "UNKNOWN")),
             "node_id": fused_result.node_id,
             "distance_cm": sensor_packet.distance_cm,
             "raw_distance_cm": sensor_packet.raw_distance_cm,
@@ -313,10 +296,12 @@ class RiverGuardianRuntime:
             "upload_success": upload_result.upload_success,
             "upload_mode": upload_result.upload_mode,
             "upload_error": upload_result.error,
-            "whatsapp_attempted": False if whatsapp_result is None else whatsapp_result.attempted,
-            "whatsapp_sent": False if whatsapp_result is None else whatsapp_result.sent,
-            "whatsapp_provider": None if whatsapp_result is None else whatsapp_result.provider,
-            "whatsapp_error": None if whatsapp_result is None else whatsapp_result.error,
+            "telegram_enabled": bool(self.settings.get("telegram_enabled", False)),
+            "telegram_configured": bool(self.settings.get("telegram_bot_token"))
+            and bool(self.settings.get("telegram_chat_id")),
+            "alert_notifier_poll_seconds": int(
+                self.settings.get("alert_notifier_poll_seconds", 12)
+            ),
         }
 
 

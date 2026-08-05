@@ -8,17 +8,40 @@ fi
 
 TAG="$1"
 REPO_URL="git@github-riverguardian:sumitzanje/riverguardianai.git"
-ROOT_DIR="/home/arduino/.riverguardian"
+ROOT_DIR="/home/arduino/riverguardian"
 MIRROR_DIR="$ROOT_DIR/repo-mirror.git"
 RELEASES_DIR="$ROOT_DIR/releases"
 SHARED_DIR="$ROOT_DIR/shared"
 STATE_DIR="$ROOT_DIR/state"
 DEPLOY_LOG="$ROOT_DIR/deploy.log"
-LIVE_LINK="/home/arduino/riverguardianai"
+CURRENT_LINK="$ROOT_DIR/current"
+LEGACY_DIR="/home/arduino/riverguardianai"
+PYTHON_BIN="$SHARED_DIR/venv/bin/python"
 SERVICE_NAME="riverguardian.service"
 TS="$(date +%Y%m%d-%H%M%S)"
 
-mkdir -p "$RELEASES_DIR" "$SHARED_DIR/config" "$SHARED_DIR/data" "$SHARED_DIR/logs" "$SHARED_DIR/secrets" "$SHARED_DIR/credentials" "$STATE_DIR"
+mkdir -p \
+  "$RELEASES_DIR" \
+  "$SHARED_DIR/config" \
+  "$SHARED_DIR/data" \
+  "$SHARED_DIR/logs" \
+  "$SHARED_DIR/queues" \
+  "$SHARED_DIR/secrets" \
+  "$SHARED_DIR/credentials" \
+  "$STATE_DIR"
+
+if [ ! -L "$CURRENT_LINK" ]; then
+  echo "ERROR: $CURRENT_LINK is not initialized." >&2
+  echo "Run first-time migration: /usr/local/sbin/riverguardian-migrate-layout <approved-tag>" >&2
+  echo "Legacy install left untouched at: $LEGACY_DIR" >&2
+  exit 68
+fi
+
+if [ ! -x "$PYTHON_BIN" ]; then
+  echo "ERROR: missing persistent Python environment at $PYTHON_BIN" >&2
+  echo "Create it under $SHARED_DIR/venv before deploying." >&2
+  exit 69
+fi
 
 if [ ! -d "$MIRROR_DIR" ]; then
   git clone --mirror "$REPO_URL" "$MIRROR_DIR"
@@ -43,26 +66,30 @@ git --git-dir "$MIRROR_DIR" worktree add --detach "$STAGE_DIR" "$TAG"
 
 # Bind release to host state outside release directories.
 mkdir -p "$STAGE_DIR/config"
-rm -rf "$STAGE_DIR/data" "$STAGE_DIR/logs" "$STAGE_DIR/secrets" "$STAGE_DIR/credentials"
+rm -rf "$STAGE_DIR/data" "$STAGE_DIR/logs" "$STAGE_DIR/queues" "$STAGE_DIR/secrets" "$STAGE_DIR/credentials"
 ln -sfn "$SHARED_DIR/data" "$STAGE_DIR/data"
 ln -sfn "$SHARED_DIR/logs" "$STAGE_DIR/logs"
+ln -sfn "$SHARED_DIR/queues" "$STAGE_DIR/queues"
 ln -sfn "$SHARED_DIR/secrets" "$STAGE_DIR/secrets"
 ln -sfn "$SHARED_DIR/credentials" "$STAGE_DIR/credentials"
 
-if [ ! -L "$STAGE_DIR/config/settings.json" ]; then
-  rm -f "$STAGE_DIR/config/settings.json"
-  ln -sfn "$SHARED_DIR/config/settings.json" "$STAGE_DIR/config/settings.json"
-fi
-if [ ! -L "$STAGE_DIR/.env" ]; then
-  rm -f "$STAGE_DIR/.env"
-  ln -sfn "$SHARED_DIR/.env" "$STAGE_DIR/.env"
-fi
-if [ ! -L "$STAGE_DIR/config/ambient_weather_secrets.json" ]; then
-  rm -f "$STAGE_DIR/config/ambient_weather_secrets.json"
-  ln -sfn "$SHARED_DIR/config/ambient_weather_secrets.json" "$STAGE_DIR/config/ambient_weather_secrets.json"
-fi
+rm -f "$STAGE_DIR/config/settings.json"
+ln -sfn "$SHARED_DIR/config/settings.json" "$STAGE_DIR/config/settings.json"
 
-PYTHON_BIN="$LIVE_LINK/.venv/bin/python"
+rm -f "$STAGE_DIR/.env"
+ln -sfn "$SHARED_DIR/.env" "$STAGE_DIR/.env"
+
+rm -f "$STAGE_DIR/config/ambient_weather_secrets.json"
+ln -sfn "$SHARED_DIR/config/ambient_weather_secrets.json" "$STAGE_DIR/config/ambient_weather_secrets.json"
+
+if [ ! -f "$SHARED_DIR/config/settings.json" ]; then
+  echo "ERROR: missing $SHARED_DIR/config/settings.json" >&2
+  exit 70
+fi
+if [ ! -f "$SHARED_DIR/config/ambient_weather_secrets.json" ]; then
+  echo "ERROR: missing $SHARED_DIR/config/ambient_weather_secrets.json" >&2
+  exit 71
+fi
 
 # Validate staged code before touching the running runtime.
 "$PYTHON_BIN" -m py_compile \
@@ -74,9 +101,7 @@ PYTHON_BIN="$LIVE_LINK/.venv/bin/python"
 "$PYTHON_BIN" -c "import sys; sys.path.insert(0, '$STAGE_DIR/python'); import connectivity_manager, main_runtime"
 
 PREV_TARGET=""
-if [ -L "$LIVE_LINK" ]; then
-  PREV_TARGET="$(readlink "$LIVE_LINK")"
-fi
+PREV_TARGET="$(readlink "$CURRENT_LINK")"
 printf '%s\n' "$PREV_TARGET" > "$STATE_DIR/previous_release_target"
 
 # Stop runtime only after validation succeeds.
@@ -84,24 +109,24 @@ sudo systemctl stop "$SERVICE_NAME"
 
 NEW_LINK="$ROOT_DIR/current.new"
 ln -sfn "$STAGE_DIR" "$NEW_LINK"
-mv -Tf "$NEW_LINK" "$LIVE_LINK"
+mv -Tf "$NEW_LINK" "$CURRENT_LINK"
 
 if ! sudo systemctl start "$SERVICE_NAME"; then
   echo "ERROR: startup failed, rolling back" >&2
   if [ -n "$PREV_TARGET" ]; then
     ln -sfn "$PREV_TARGET" "$NEW_LINK"
-    mv -Tf "$NEW_LINK" "$LIVE_LINK"
+    mv -Tf "$NEW_LINK" "$CURRENT_LINK"
   fi
   sudo systemctl start "$SERVICE_NAME" || true
   exit 66
 fi
 
-if ! systemctl --no-pager --full status "$SERVICE_NAME" >/dev/null 2>&1; then
+if ! systemctl is-active --quiet "$SERVICE_NAME"; then
   echo "ERROR: service health check failed, rolling back" >&2
   if [ -n "$PREV_TARGET" ]; then
     sudo systemctl stop "$SERVICE_NAME" || true
     ln -sfn "$PREV_TARGET" "$NEW_LINK"
-    mv -Tf "$NEW_LINK" "$LIVE_LINK"
+    mv -Tf "$NEW_LINK" "$CURRENT_LINK"
     sudo systemctl start "$SERVICE_NAME" || true
   fi
   exit 67
@@ -109,3 +134,4 @@ fi
 
 printf '%s tag=%s commit=%s release=%s\n' "$TS" "$TAG" "$COMMIT" "$STAGE_DIR" >> "$DEPLOY_LOG"
 echo "Deploy successful: $TAG ($COMMIT)"
+

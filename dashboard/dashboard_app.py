@@ -92,7 +92,7 @@ def main() -> None:
     df = fetch_latest_records(limit=300)
 
     if df.empty:
-        st.warning("No database records found yet. Run `python main_runtime.py` first.")
+        st.warning("No database records found yet. Run `./.venv/bin/python python/main_runtime.py` from the project root first.")
         return
 
     latest = df.iloc[-1]

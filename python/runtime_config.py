@@ -100,15 +100,6 @@ def load_runtime_settings(project_root: Path) -> dict[str, Any]:
     elif "SUPABASE_KEY" in env:
         settings["upload_api_key"] = env["SUPABASE_KEY"]
 
-    # If credentials are present but upload mode was not explicitly forced,
-    # prefer Supabase so deployment can switch over without a separate config edit.
-    if (
-        "UPLOAD_MODE" not in env
-        and settings.get("upload_endpoint")
-        and settings.get("upload_api_key")
-    ):
-        settings["upload_mode"] = "SUPABASE"
-
     if "UPLOAD_TABLE_NAME" in env:
         settings["upload_table_name"] = env["UPLOAD_TABLE_NAME"]
 

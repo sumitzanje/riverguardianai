@@ -10,3 +10,4 @@ if [ "$#" -ne 0 ]; then
 fi
 
 exec /sbin/dhclient -v "$INTERFACE"
+

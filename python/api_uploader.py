@@ -15,6 +15,7 @@ Future mode:
 from __future__ import annotations
 
 import json
+import re
 import time
 from importlib import import_module
 from dataclasses import dataclass
@@ -242,28 +243,67 @@ class ApiUploader:
             "Prefer": "return=minimal",
         }
 
-        try:
-            response = requests_module.post(
-                url,
-                headers=headers,
-                data=json.dumps(payload),
-                timeout=self.timeout_s,
-            )
+        working_payload = dict(payload)
+        dropped_columns: list[str] = []
 
-            success = 200 <= response.status_code < 300
+        try:
+            for _ in range(12):
+                response = requests_module.post(
+                    url,
+                    headers=headers,
+                    data=json.dumps(working_payload),
+                    timeout=self.timeout_s,
+                )
+
+                success = 200 <= response.status_code < 300
+                if success:
+                    message = "Supabase upload successful."
+                    if dropped_columns:
+                        message = (
+                            "Supabase upload successful after dropping unsupported columns: "
+                            + ", ".join(dropped_columns)
+                        )
+
+                    return UploadResult(
+                        upload_success=True,
+                        upload_mode="SUPABASE",
+                        endpoint=url,
+                        status_code=response.status_code,
+                        record_id=payload.get("local_record_id"),
+                        message=message,
+                        error=None,
+                        calculated_time_s=time.time(),
+                    )
+
+                unsupported_column = self._extract_unsupported_column(response.text)
+                if (
+                    unsupported_column
+                    and unsupported_column in working_payload
+                    and unsupported_column not in dropped_columns
+                ):
+                    dropped_columns.append(unsupported_column)
+                    working_payload.pop(unsupported_column, None)
+                    continue
+
+                return UploadResult(
+                    upload_success=False,
+                    upload_mode="SUPABASE",
+                    endpoint=url,
+                    status_code=response.status_code,
+                    record_id=payload.get("local_record_id"),
+                    message="Supabase upload failed.",
+                    error=response.text,
+                    calculated_time_s=time.time(),
+                )
 
             return UploadResult(
-                upload_success=success,
+                upload_success=False,
                 upload_mode="SUPABASE",
                 endpoint=url,
-                status_code=response.status_code,
+                status_code=None,
                 record_id=payload.get("local_record_id"),
-                message=(
-                    "Supabase upload successful."
-                    if success
-                    else "Supabase upload failed."
-                ),
-                error=None if success else response.text,
+                message="Supabase upload failed after schema-compat retries.",
+                error="Exceeded retry budget while removing unsupported columns.",
                 calculated_time_s=time.time(),
             )
 
@@ -285,3 +325,12 @@ class ApiUploader:
             return import_module("requests")
         except ModuleNotFoundError:
             return None
+
+    @staticmethod
+    def _extract_unsupported_column(response_text: str) -> Optional[str]:
+        # PostgREST unknown-column errors often contain text like:
+        # "Could not find the 'accepted_distance_cm' column of 'riverguardian_events' ..."
+        match = re.search(r"'([^']+)' column", response_text or "")
+        if not match:
+            return None
+        return match.group(1)

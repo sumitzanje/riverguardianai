@@ -16,6 +16,7 @@ This project uses controlled, tag-approved deployments.
 - .env
 - SQLite database files
 - runtime logs
+- local queues
 - secrets and credentials
 
 ## Runtime Launcher
@@ -23,8 +24,38 @@ This project uses controlled, tag-approved deployments.
 Production runtime command:
 
 ```bash
-/home/arduino/riverguardianai/.venv/bin/python /home/arduino/riverguardianai/python/main_runtime.py
+cd /home/arduino/riverguardianai
+./.venv/bin/python python/main_runtime.py
 ```
+
+From project root, this command is incorrect:
+
+```bash
+./.venv/bin/python main_runtime.py
+```
+
+## Target Deployment Layout (Pre-Install Design)
+
+```text
+/home/arduino/riverguardian/
+	current -> /home/arduino/riverguardian/releases/<tag>-<commit>
+	releases/
+	shared/
+		venv/
+		config/settings.json
+		config/ambient_weather_secrets.json
+		.env
+		data/
+		logs/
+		queues/
+		secrets/
+		credentials/
+```
+
+Notes:
+- `/home/arduino/riverguardianai` remains untouched until migration is reviewed and tested.
+- `current` is switched atomically only after staged validation.
+- Python environment is persistent at `shared/venv` and reused across releases.
 
 ## Device Access Path
 
@@ -34,7 +65,7 @@ Production runtime command:
 ## Controlled Deploy Command
 
 ```bash
-sudo /usr/local/sbin/riverguardian-deploy v0.1.0
+sudo /usr/local/sbin/riverguardian-deploy <approved-tag>
 ```
 
 Behavior requirements:
@@ -44,6 +75,23 @@ Behavior requirements:
 - Preserve host-specific state and secrets.
 - Restart service and verify health.
 - Roll back on failed restart/health check.
+
+## First-Time Migration (Explicit)
+
+Run once on hosts currently using `/home/arduino/riverguardianai` as a normal directory:
+
+```bash
+sudo /usr/local/sbin/riverguardian-migrate-layout <approved-tag>
+```
+
+Migration behavior:
+- creates backup archive of legacy install;
+- initializes `/home/arduino/riverguardian/{releases,shared,state}`;
+- copies private settings and secrets into `shared`;
+- copies persistent data/log/queue/secret/credential directories;
+- reuses or creates persistent venv at `shared/venv`;
+- stages approved tag and creates `current` symlink;
+- leaves `/home/arduino/riverguardianai` untouched for rollback safety.
 
 ## Install Artifacts (Review First)
 
@@ -61,8 +109,8 @@ Do not install sudoers automatically. Use manual review via visudo.
 
 1. Commit and push to private repo.
 2. Create and push annotated tag.
-3. On device, fetch tag into staging release directory.
-4. Run syntax/import checks.
-5. Switch to new release only if validation passes.
+3. On first install, run explicit migration command.
+4. For each release, deploy approved tag and run staged validation.
+5. Switch `current` only if validation passes.
 6. Restart service and verify health.
-7. Roll back to previous release on failure.
+7. Roll back to previous release target on failure.

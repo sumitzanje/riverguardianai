@@ -1,0 +1,115 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ]; then
+  echo "Usage: riverguardian-migrate-layout <approved-tag>" >&2
+  exit 64
+fi
+
+TAG="$1"
+REPO_URL="git@github-riverguardian:sumitzanje/riverguardianai.git"
+LEGACY_DIR="/home/arduino/riverguardianai"
+ROOT_DIR="/home/arduino/riverguardian"
+MIRROR_DIR="$ROOT_DIR/repo-mirror.git"
+RELEASES_DIR="$ROOT_DIR/releases"
+SHARED_DIR="$ROOT_DIR/shared"
+STATE_DIR="$ROOT_DIR/state"
+BACKUP_DIR="$ROOT_DIR/migration-backups"
+CURRENT_LINK="$ROOT_DIR/current"
+TS="$(date +%Y%m%d-%H%M%S)"
+
+if [ ! -d "$LEGACY_DIR" ]; then
+  echo "ERROR: legacy install not found at $LEGACY_DIR" >&2
+  exit 65
+fi
+
+if [ -e "$CURRENT_LINK" ]; then
+  echo "ERROR: migration already initialized ($CURRENT_LINK exists)." >&2
+  exit 66
+fi
+
+mkdir -p \
+  "$RELEASES_DIR" \
+  "$SHARED_DIR/config" \
+  "$SHARED_DIR/data" \
+  "$SHARED_DIR/logs" \
+  "$SHARED_DIR/queues" \
+  "$SHARED_DIR/secrets" \
+  "$SHARED_DIR/credentials" \
+  "$STATE_DIR" \
+  "$BACKUP_DIR"
+
+BACKUP_TAR="$BACKUP_DIR/riverguardianai-$TS.tgz"
+tar -C /home/arduino -czf "$BACKUP_TAR" riverguardianai
+
+if [ -f "$LEGACY_DIR/config/settings.json" ]; then
+  cp -a "$LEGACY_DIR/config/settings.json" "$SHARED_DIR/config/settings.json"
+fi
+if [ -f "$LEGACY_DIR/config/ambient_weather_secrets.json" ]; then
+  cp -a "$LEGACY_DIR/config/ambient_weather_secrets.json" "$SHARED_DIR/config/ambient_weather_secrets.json"
+fi
+if [ -f "$LEGACY_DIR/.env" ]; then
+  cp -a "$LEGACY_DIR/.env" "$SHARED_DIR/.env"
+fi
+
+for dir in data logs queues secrets credentials; do
+  if [ -d "$LEGACY_DIR/$dir" ]; then
+    cp -a "$LEGACY_DIR/$dir/." "$SHARED_DIR/$dir/"
+  fi
+done
+
+if [ -d "$LEGACY_DIR/.venv" ] && [ ! -d "$SHARED_DIR/venv" ]; then
+  cp -a "$LEGACY_DIR/.venv" "$SHARED_DIR/venv"
+fi
+
+if [ ! -x "$SHARED_DIR/venv/bin/python" ]; then
+  echo "WARNING: persistent venv missing at $SHARED_DIR/venv/bin/python" >&2
+  echo "Create it before cutover: python3 -m venv $SHARED_DIR/venv" >&2
+fi
+
+if [ ! -d "$MIRROR_DIR" ]; then
+  git clone --mirror "$REPO_URL" "$MIRROR_DIR"
+fi
+
+git --git-dir "$MIRROR_DIR" fetch --prune --tags origin
+
+if ! git --git-dir "$MIRROR_DIR" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+  echo "ERROR: tag not found: $TAG" >&2
+  exit 67
+fi
+
+COMMIT="$(git --git-dir "$MIRROR_DIR" rev-list -n 1 "$TAG")"
+SHORT_COMMIT="$(printf '%s' "$COMMIT" | cut -c1-12)"
+STAGE_DIR="$RELEASES_DIR/${TAG}-${SHORT_COMMIT}"
+
+if [ -d "$STAGE_DIR" ]; then
+  rm -rf "$STAGE_DIR"
+fi
+
+git --git-dir "$MIRROR_DIR" worktree add --detach "$STAGE_DIR" "$TAG"
+
+mkdir -p "$STAGE_DIR/config"
+rm -rf "$STAGE_DIR/data" "$STAGE_DIR/logs" "$STAGE_DIR/queues" "$STAGE_DIR/secrets" "$STAGE_DIR/credentials"
+ln -sfn "$SHARED_DIR/data" "$STAGE_DIR/data"
+ln -sfn "$SHARED_DIR/logs" "$STAGE_DIR/logs"
+ln -sfn "$SHARED_DIR/queues" "$STAGE_DIR/queues"
+ln -sfn "$SHARED_DIR/secrets" "$STAGE_DIR/secrets"
+ln -sfn "$SHARED_DIR/credentials" "$STAGE_DIR/credentials"
+
+rm -f "$STAGE_DIR/config/settings.json"
+ln -sfn "$SHARED_DIR/config/settings.json" "$STAGE_DIR/config/settings.json"
+rm -f "$STAGE_DIR/config/ambient_weather_secrets.json"
+ln -sfn "$SHARED_DIR/config/ambient_weather_secrets.json" "$STAGE_DIR/config/ambient_weather_secrets.json"
+rm -f "$STAGE_DIR/.env"
+ln -sfn "$SHARED_DIR/.env" "$STAGE_DIR/.env"
+
+ln -sfn "$STAGE_DIR" "$CURRENT_LINK"
+
+printf '%s\n' "$LEGACY_DIR" > "$STATE_DIR/legacy_install_path"
+printf '%s\n' "$BACKUP_TAR" > "$STATE_DIR/legacy_backup_tar"
+
+echo "Migration layout prepared."
+echo "Legacy path left untouched: $LEGACY_DIR"
+echo "Backup archive: $BACKUP_TAR"
+echo "Current release link: $CURRENT_LINK -> $(readlink "$CURRENT_LINK")"
+echo "Next review step: validate runtime using $CURRENT_LINK before service cutover."

@@ -23,7 +23,7 @@ Expected result: a JSON payload with `"station_status": "OK"` when credentials a
 
 ## Production Runtime (Canonical)
 
-Run the deployment runtime from the `python` folder:
+Run the deployment runtime from the project root:
 
 ```powershell
 .\.venv\Scripts\python.exe .\python\main_runtime.py
@@ -54,8 +54,8 @@ RiverGuardian can upload cycle payloads to Supabase once credentials are configu
 1. Create a Supabase project and apply [supabase/001_riverguardian_events.sql](supabase/001_riverguardian_events.sql).
 2. Put your project URL and Supabase anon key into `.env` as `SUPABASE_URL` and `SUPABASE_KEY`.
 3. The migration enables insert-only writes from `anon` and `authenticated`, so the UNO Q can post directly without a separate login flow.
-4. Keep `UPLOAD_MODE` unset, or set it explicitly to `SUPABASE`.
-5. When both Supabase values are present, the runtime will prefer Supabase automatically.
+4. Set `UPLOAD_MODE` explicitly (for example `SUPABASE` for cloud upload).
+5. Runtime respects explicit upload mode selection and does not auto-switch mode based only on endpoint/key presence.
 
 If you want the most conservative production design, keep the device behind Tailscale and move the Supabase write into a trusted backend relay later. For a fast field deployment, the direct upload path is already ready.
 

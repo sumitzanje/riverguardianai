@@ -11,13 +11,20 @@ sudo systemctl status riverguardian.service --no-pager
 2. Check recent deploy log:
 
 ```bash
-tail -n 20 /home/arduino/.riverguardian/deploy.log
+tail -n 20 /home/arduino/riverguardian/deploy.log
 ```
 
 3. Roll back to a known good tag:
 
 ```bash
 sudo /usr/local/sbin/riverguardian-deploy <known-good-tag>
+```
+
+4. If first-time migration cutover fails, restore legacy runtime manually:
+
+```bash
+cd /home/arduino/riverguardianai
+./.venv/bin/python python/main_runtime.py
 ```
 
 ## Emergency runtime recovery
