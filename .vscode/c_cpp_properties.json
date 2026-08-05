@@ -1,0 +1,39 @@
+{
+  "version": 4,
+  "configurations": [
+    {
+      "name": "Arduino UNO Q",
+      "compilerPath": "${env:LOCALAPPDATA}/Arduino15/packages/zephyr/tools/arm-zephyr-eabi/0.16.8/bin/arm-zephyr-eabi-g++.exe",
+      "forcedInclude": [
+        "${workspaceFolder}/.vscode/intellisense_stub.h",
+        "${env:LOCALAPPDATA}/Arduino15/packages/arduino/hardware/zephyr/0.56.0/cores/arduino/Arduino.h"
+      ],
+      "includePath": [
+        "${workspaceFolder}/**",
+        "${env:LOCALAPPDATA}/Arduino15/packages/arduino/hardware/zephyr/**/cores/arduino",
+        "${env:LOCALAPPDATA}/Arduino15/packages/arduino/hardware/zephyr/**/variants/**",
+        "${env:LOCALAPPDATA}/Arduino15/packages/arduino/hardware/zephyr/**/system/includes",
+        "${env:LOCALAPPDATA}/Arduino15/packages/zephyr/tools/arm-zephyr-eabi/**/arm-zephyr-eabi/include",
+        "${env:LOCALAPPDATA}/Arduino15/packages/zephyr/tools/arm-zephyr-eabi/**/arm-zephyr-eabi/sys-include",
+        "${env:LOCALAPPDATA}/Arduino15/packages/zephyr/tools/arm-zephyr-eabi/**/picolibc/include",
+        "${env:LOCALAPPDATA}/Arduino15/packages/zephyr/tools/arm-zephyr-eabi/**/picolibc/arm-zephyr-eabi/sys-include",
+        "${env:LOCALAPPDATA}/Arduino15/packages/zephyr/tools/arm-zephyr-eabi/**/include",
+        "${env:LOCALAPPDATA}/Arduino15/packages/zephyr/tools/arm-zephyr-eabi/**/include/c++/**"
+      ],
+      "defines": [
+        "ARDUINO=100",
+        "ARDUINO_ARCH_ZEPHYR"
+      ],
+      "intelliSenseMode": "windows-gcc-arm",
+      "cppStandard": "c++17",
+      "cStandard": "c11",
+      "browse": {
+        "path": [
+          "${workspaceFolder}",
+          "${env:LOCALAPPDATA}/Arduino15/packages/arduino/hardware/zephyr",
+          "${env:LOCALAPPDATA}/Arduino15/packages/zephyr/tools/arm-zephyr-eabi"
+        ]
+      }
+    }
+  ]
+}

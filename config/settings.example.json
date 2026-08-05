@@ -1,0 +1,54 @@
+{
+  "device_id": "DEVICE_ID",
+  "site_id": "SITE_ID",
+  "node_id": "NODE_ID",
+  "bridge_name": "BRIDGE_NAME",
+  "danger_distance_cm": 120.0,
+  "warning_clearance_cm": 100.0,
+  "critical_clearance_cm": 30.0,
+  "minimum_rise_rate_cm_min": 0.1,
+  "orange_time_to_unsafe_min": 30.0,
+  "yellow_time_to_unsafe_min": 60.0,
+
+  "mock_mode": false,
+  "serial_port": "AUTO",
+  "monitor_endpoint": "tcp://127.0.0.1:7500",
+  "baud_rate": 115200,
+  "monitoring_interval_seconds": 30,
+  "max_runtime_cycles": null,
+
+  "send_yellow_alerts": false,
+  "orange_cooldown_s": 900,
+  "red_cooldown_s": 300,
+  "yellow_cooldown_s": 1800,
+
+  "upload_mode": "MOCK",
+  "upload_endpoint": null,
+  "upload_api_key": null,
+  "upload_table_name": "riverguardian_events",
+
+  "whatsapp_enabled": false,
+  "whatsapp_provider": "TWILIO",
+  "whatsapp_timeout_s": 10,
+  "whatsapp_fallback_enabled": false,
+
+  "telegram_enabled": false,
+  "telegram_bot_token": null,
+  "telegram_chat_id": null,
+  "telegram_timeout_s": 10,
+
+  "alert_notifier_poll_seconds": 12,
+  "alert_notifier_batch_size": 25,
+  "alert_notifier_timeout_s": 10,
+
+  "modem_at_port": "/dev/ttyUSB6",
+  "modem_baud": 115200,
+  "modem_interface": "MODEM_INTERFACE",
+  "modem_apn": "www",
+  "modem_recovery_enabled": true,
+  "modem_recovery_min_interval_s": 20,
+  "modem_recovery_max_interval_s": 300,
+  "modem_dhcp_timeout_s": 25,
+  "connectivity_health_url": "https://api.ipify.org",
+  "connectivity_check_timeout_s": 5
+}

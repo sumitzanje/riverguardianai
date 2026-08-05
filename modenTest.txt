@@ -1,0 +1,735 @@
+You are helping me complete a deployment-ready IoT project named RiverGuardian AI running on an Arduino UNO Q.
+
+IMPORTANT WORKING METHOD
+
+Do not immediately rewrite or reorganize the project.
+
+First:
+
+1. Inspect the complete existing repository.
+2. Identify the current directory structure.
+3. Read the existing README and configuration files.
+4. Identify how sensor readings currently move from the STM32/MCU side to Linux.
+5. Identify the dashboard implementation and its expected data format.
+6. Identify existing Python entry points and services.
+7. Give me a concise assessment of what already works and what remains.
+8. Propose changes before editing files.
+9. Make changes incrementally and test each block before proceeding.
+
+Do not invent credentials, API URLs, database schemas, device IDs, phone numbers, or secrets. Ask me for required values when they are genuinely needed.
+
+============================================================
+PROJECT
+============================================================
+
+Project name:
+RiverGuardian AI
+
+Purpose:
+A solar-powered river water-level monitoring and flood-warning system.
+
+Deployment location:
+A river bridge near Karjat, Maharashtra, India.
+
+Core functions:
+
+- Read river water level using an ultrasonic sensor.
+- Process measurements locally.
+- Calculate clearance, rise rate, risk level and time to unsafe level.
+- Continue operating when cloud connectivity is unavailable.
+- Store local readings.
+- Upload readings and device health to Supabase when LTE is available.
+- Display data on an existing dashboard.
+- Send WhatsApp alerts for meaningful risk conditions.
+- Allow secure remote maintenance and code updates after field deployment.
+- Automatically restart after power failure, software crash or modem reconnect.
+
+============================================================
+HARDWARE ARCHITECTURE
+============================================================
+
+Arduino UNO Q:
+- Linux SBC side runs Debian and Python.
+- Real-time MCU side reads the sensor.
+- Linux username: arduino
+- Linux hostname: sumit
+- Current local Wi-Fi IP: 192.168.100.8
+
+Sensor:
+- DYP-A16NY4W RS485 ultrasonic sensor.
+- Sensor-side acquisition is handled by the MCU/sketch.
+- Measurements are passed to Linux using the existing project communication method, expected to be RPMsg or the currently implemented bridge.
+- Preserve the working sensor communication unless inspection proves otherwise.
+
+Cellular modem:
+- 7Semi / Quectel EC200U-CN LTE Cat-1 USB modem.
+- Connected to the UNO Q through a USB hub using a USB data cable.
+- LTE antenna connected.
+- GNSS antenna is currently not required.
+
+Mobile network:
+- Vi India
+- APN: www
+
+============================================================
+CELLULAR MODEM BRING-UP ALREADY COMPLETED
+============================================================
+
+The following has already been tested successfully on the UNO Q.
+
+USB enumeration:
+
+Command:
+lsusb
+
+Relevant result:
+Bus 001 Device 005: ID 2c7c:0901 Quectel Wireless Solutions Co., Ltd. Android
+
+The first USB cable supplied power only and did not provide USB data.
+Replacing it with a proper USB data cable solved enumeration.
+
+Linux serial interfaces created:
+
+/dev/ttyUSB0
+/dev/ttyUSB1
+/dev/ttyUSB2
+/dev/ttyUSB3
+/dev/ttyUSB4
+/dev/ttyUSB5
+/dev/ttyUSB6
+
+The confirmed modem AT-command port is:
+
+/dev/ttyUSB6
+
+The modem AT port was discovered by opening each /dev/ttyUSB* port at
+115200 baud and sending:
+
+AT\r
+
+/dev/ttyUSB6 responded:
+
+OK
+
+Some other ports are diagnostic/logging interfaces.
+Do not treat all ttyUSB ports as AT ports.
+
+Modem identification:
+
+ATI
+
+Response:
+
+Quectel
+EC200U
+Revision: EC200UCNAAR03A16M08
+
+Firmware:
+
+EC200UCNAAR03A16M08
+
+SIM status:
+
+AT+CPIN?
+
+Response:
+
++CPIN: READY
+
+Operator:
+
+AT+COPS?
+
+Response:
+
++COPS: 0,0,"Vi India",7
+
+LTE registration:
+
+AT+CEREG?
+
+Response:
+
++CEREG: 0,1
+
+Packet attachment:
+
+AT+CGATT?
+
+Response:
+
++CGATT: 1
+
+Signal:
+
+AT+CSQ
+
+Response:
+
++CSQ: 19,99
+
+Extended LTE signal:
+
+AT+QCSQ
+
+Response:
+
++QCSQ: "LTE",70,-101,61,-16
+
+USB network mode:
+
+AT+QCFG="usbnet"
+
+Response:
+
++QCFG: "usbnet",1
+
+This means the modem is configured in USB ECM networking mode.
+
+PDP context configured with:
+
+AT+CGDCONT=1,"IP","www"
+
+Verification:
+
+AT+CGDCONT?
+
+Response:
+
++CGDCONT: 1,"IP","www","0.0.0.0",0,0
+
+PDP context activated with:
+
+AT+CGACT=1,1
+
+Verification:
+
+AT+CGACT?
+
+Response:
+
++CGACT: 1,1
+
+Assigned cellular address:
+
+AT+CGPADDR=1
+
+Response:
+
++CGPADDR: 1,"100.96.148.250"
+
+USB network session started with:
+
+AT+QNETDEVCTL=1,1,1
+
+Response:
+
+OK
+
+The command:
+
+AT+QICSGP=1,1,"www","","",1
+
+returned ERROR and was not required for the working ECM setup.
+Do not depend on that command.
+
+Linux ECM interface:
+
+enx024bb3b9ebe5
+
+Before QNETDEVCTL it showed NO-CARRIER.
+
+After QNETDEVCTL it showed:
+
+enx024bb3b9ebe5 UP
+<BROADCAST,MULTICAST,UP,LOWER_UP>
+
+The DHCP client was installed with:
+
+sudo apt update
+sudo apt install -y isc-dhcp-client
+
+DHCP was obtained using:
+
+sudo dhclient -v enx024bb3b9ebe5
+
+Result:
+
+DHCPOFFER of 100.96.148.250
+DHCPACK of 100.96.148.250
+bound to 100.96.148.250
+
+LTE internet test:
+
+ping -I enx024bb3b9ebe5 -c 4 8.8.8.8
+
+Result:
+4 transmitted
+4 received
+0% packet loss
+
+DNS test:
+
+ping -I enx024bb3b9ebe5 -c 4 google.com
+
+Result:
+4 transmitted
+4 received
+0% packet loss
+
+Python HTTPS test:
+
+python3 -c "import requests; print(requests.get('https://api.ipify.org').text)"
+
+Result:
+27.97.85.76
+
+Default route verification:
+
+ip route get 8.8.8.8
+
+Result:
+
+8.8.8.8 via 100.96.148.1 dev enx024bb3b9ebe5
+src 100.96.148.250
+
+Therefore, the UNO Q currently has verified internet connectivity through the EC200U-CN LTE modem.
+
+NetworkManager currently reports:
+
+wlan0       wifi      connected
+ttyUSB5     gsm       disconnected
+
+NetworkManager does not currently show the ECM interface as a managed connection, even though the Linux interface and LTE routing work correctly.
+
+Do not assume that NetworkManager or ModemManager is currently responsible for the working data connection.
+
+============================================================
+CURRENT SSH ACCESS
+============================================================
+
+Current local SSH command:
+
+ssh arduino@192.168.100.8
+
+The PC and UNO Q are currently on the same Wi-Fi network.
+
+This local IP will not be usable after field installation.
+
+The cellular address 100.96.148.250 is behind the mobile carrier network and should not be treated as a directly reachable public SSH address.
+
+The intended remote-access solution is Tailscale installed on:
+
+1. The UNO Q
+2. My Windows development PC
+
+The UNO Q must establish its Tailscale connection outbound through LTE.
+
+After Tailscale is configured, VS Code Remote SSH should connect to the UNO Q using its Tailscale hostname or Tailscale IP rather than 192.168.100.8.
+
+Do not expose port 22 directly to the public internet.
+
+============================================================
+CURRENT SOFTWARE STATUS
+============================================================
+
+Some software has already been developed.
+
+Known existing or planned components include:
+
+- Sensor-side MCU sketch.
+- Linux Python sensor/risk processing.
+- Existing dashboard developed in VS Code.
+- Risk states such as GREEN and ORANGE.
+- Water-level smoothing.
+- Rise-rate calculation.
+- Time-to-unsafe calculation.
+- Local processing intended to continue without internet.
+
+Previous example data included:
+
+- Distance around 188–190 cm.
+- Valid sample count.
+- Sensor status.
+- Calculated clearance.
+- Rise rate in cm/min.
+- Time to unsafe threshold.
+- Risk state.
+
+Do not assume exact table names or current JSON keys.
+Inspect the repository and report the real implemented schema.
+
+============================================================
+TARGET PRODUCTION ARCHITECTURE
+============================================================
+
+The final system should use this logical flow:
+
+DYP-A16 RS485 sensor
+        |
+MCU real-time acquisition
+        |
+RPMsg or current implemented bridge
+        |
+Linux Python ingestion
+        |
+Validation and filtering
+        |
+Risk engine
+        |
+Local SQLite queue/database
+        |
+Connectivity manager
+        |
+EC200U LTE
+        |
+Supabase
+        |
+Dashboard and WhatsApp alert workflow
+
+Remote administration:
+
+Windows PC
+        |
+Tailscale
+        |
+LTE internet
+        |
+UNO Q
+        |
+SSH / VS Code Remote SSH
+
+Software deployment:
+
+Development branch
+        |
+Git commit
+        |
+Controlled pull or deployment script
+        |
+Dependency installation
+        |
+Configuration validation
+        |
+systemd restart
+        |
+Health check
+        |
+Rollback if startup fails
+
+============================================================
+REQUIRED REMAINING BLOCKS
+============================================================
+
+Implement and validate these blocks in stages.
+
+STAGE 1 — Repository and system assessment
+
+- Inspect existing code.
+- Produce an architecture map.
+- Identify all entry points.
+- Identify duplicate or obsolete files.
+- Identify dependencies.
+- Identify how the dashboard receives data.
+- Identify the existing sensor message schema.
+- Identify missing tests.
+- Do not edit until this assessment is presented.
+
+STAGE 2 — Configuration and secrets
+
+Create a safe configuration system.
+
+Use environment variables or a protected environment file for:
+
+- SUPABASE_URL
+- SUPABASE_KEY appropriate for a field device
+- DEVICE_ID
+- SITE_ID
+- MODEM_AT_PORT=/dev/ttyUSB6
+- MODEM_INTERFACE=enx024bb3b9ebe5
+- MODEM_APN=www
+- ALERT_ENDPOINT or WhatsApp integration settings
+- logging level
+- risk thresholds
+
+Requirements:
+
+- Never hard-code secrets.
+- Never commit .env files.
+- Add .env.example containing placeholders only.
+- Ensure secret files have restrictive Linux permissions.
+- Clearly distinguish client-safe keys from privileged server-side credentials.
+- Do not place a Supabase service-role key in dashboard/browser code.
+
+STAGE 3 — Connectivity manager
+
+Create a robust Linux-side connectivity component that:
+
+- Detects whether enx024bb3b9ebe5 exists.
+- Detects whether it has LOWER_UP.
+- Checks whether it has an IPv4 address.
+- Verifies internet connectivity.
+- Avoids relying only on ping.
+- Can use an HTTPS health request.
+- Detects modem disconnection and reconnection.
+- Opens /dev/ttyUSB6 safely.
+- Sends only the required AT commands.
+- Does not fight with another process holding a modem port.
+- Starts the ECM data session if necessary.
+- Requests or renews DHCP if necessary.
+- Uses bounded retries and exponential backoff.
+- Logs every recovery action.
+- Never blocks sensor acquisition indefinitely.
+- Continues local recording while offline.
+
+Do not repeatedly reset the modem when the internet is healthy.
+
+STAGE 4 — Supabase integration
+
+Use the official Python Supabase client or a controlled HTTPS implementation.
+
+The device should upload:
+
+- device_id
+- site_id
+- measurement timestamp in UTC
+- received timestamp in UTC
+- distance or measured water level
+- calculated clearance
+- rise rate
+- time to unsafe
+- risk state
+- sensor validity/status
+- signal information when available
+- battery/power information when available
+- firmware/software version
+- connectivity status
+- unique event or reading ID
+
+Requirements:
+
+- Idempotent upload where practical.
+- Avoid duplicate rows after reconnection.
+- Batch queued data when the network returns.
+- Use timeouts.
+- Use retry with backoff.
+- Keep local data if an upload fails.
+- Do not let a cloud failure stop local risk calculation.
+- Validate the existing dashboard schema before designing new tables.
+
+STAGE 5 — Offline queue
+
+Implement a durable local SQLite queue.
+
+Required behavior:
+
+- Save readings locally before or independently of cloud upload.
+- Mark records as pending, uploaded or failed.
+- Retry pending records in chronological order.
+- Prevent unlimited disk growth.
+- Apply a documented retention policy.
+- Preserve critical alert events longer than routine readings.
+- Recover cleanly after power loss.
+- Avoid database corruption through proper transactions.
+
+STAGE 6 — Alert engine
+
+Implement alerts based on meaningful state transitions, not every sample.
+
+Examples:
+
+- GREEN to ORANGE
+- ORANGE to RED
+- Rapid rise detected
+- Sensor invalid for a defined period
+- Device offline/recovered
+- Low battery
+- Water reaches a critical threshold
+
+Requirements:
+
+- Alert deduplication.
+- Cooldown period.
+- Escalation rules.
+- Recovery notification.
+- Local alert-event logging.
+- Queue alert requests while offline.
+- Do not expose WhatsApp provider credentials in dashboard code.
+
+First propose the WhatsApp architecture before implementation.
+
+Preferred pattern:
+
+UNO Q uploads an alert event to Supabase.
+A secure server-side function or approved messaging backend sends WhatsApp.
+Do not automatically place permanent privileged messaging credentials directly on the device unless there is a documented reason.
+
+STAGE 7 — Remote access with Tailscale
+
+Create a documented installation and validation plan for Tailscale on the UNO Q and Windows PC.
+
+Requirements:
+
+- Tailscale starts automatically at boot.
+- UNO Q reconnects after LTE restoration.
+- SSH is reachable only through the private tailnet.
+- Public port forwarding is not used.
+- Document the exact VS Code Remote SSH host configuration.
+- Document how to recover if Tailscale is offline.
+- Preserve local SSH over Wi-Fi while bench testing.
+
+Do this as a separate controlled step.
+Do not disrupt the currently working LTE configuration.
+
+STAGE 8 — Service management
+
+Create systemd service units for the production application.
+
+The service should:
+
+- Start after required local services.
+- Not assume internet is immediately available.
+- Restart on failure.
+- Use a bounded restart delay.
+- Run as a non-root user wherever possible.
+- Load secrets from a protected EnvironmentFile.
+- Write structured logs.
+- Support journalctl troubleshooting.
+- Shut down cleanly.
+- Avoid restart loops caused by configuration errors.
+
+Consider separating:
+
+- riverguardian-main.service
+- riverguardian-connectivity.service
+
+Only separate them if the architecture benefits from it.
+
+STAGE 9 — Health monitoring
+
+Implement a local health/status output containing:
+
+- sensor last-seen time
+- last valid reading
+- current risk state
+- LTE interface state
+- internet state
+- last Supabase success
+- pending queue count
+- software version
+- process uptime
+- restart count if available
+- disk usage
+- database size
+
+Provide a CLI command or local health endpoint to inspect it.
+
+STAGE 10 — Deployment and update process
+
+Use Git for source control.
+
+Create scripts such as:
+
+- scripts/install.sh
+- scripts/configure.sh
+- scripts/preflight_check.sh
+- scripts/deploy.sh
+- scripts/rollback.sh
+- scripts/modem_check.sh
+- scripts/health_check.sh
+
+The deployment process must:
+
+1. Confirm configuration exists.
+2. Confirm required devices/interfaces exist or fail gracefully.
+3. Install pinned dependencies.
+4. Run automated tests.
+5. Preserve the previous working version.
+6. Deploy the new version.
+7. Restart services.
+8. Verify health.
+9. Roll back if the new version does not become healthy.
+
+Do not use blind git pull plus immediate restart as the only deployment mechanism.
+
+STAGE 11 — Testing
+
+Provide tests for:
+
+- Valid sensor reading.
+- Invalid sensor reading.
+- Missing sensor data.
+- Rapid rise.
+- State transition.
+- LTE available.
+- LTE absent.
+- LTE reconnect.
+- Supabase timeout.
+- Duplicate upload attempt.
+- Local queue recovery.
+- Process restart.
+- Reboot without Wi-Fi.
+- Boot with delayed modem availability.
+- Corrupt or missing configuration.
+- Low disk condition.
+
+Use mocks for cloud and modem dependencies when appropriate.
+
+STAGE 12 — Documentation
+
+Update README with:
+
+- System architecture.
+- Hardware connections.
+- Local development.
+- SSH access.
+- LTE modem setup.
+- Tailscale remote access.
+- Environment configuration.
+- Supabase setup.
+- Starting/stopping services.
+- Viewing logs.
+- Updating software.
+- Rollback.
+- Troubleshooting.
+- Field deployment checklist.
+
+============================================================
+IMPORTANT IMPLEMENTATION RULES
+============================================================
+
+- Work incrementally.
+- Complete one stage and test it before starting the next.
+- Preserve currently working sensor and dashboard behavior.
+- Never assume internet is continuously available.
+- Never make the sensor safety logic depend on Supabase.
+- Never store secrets in Git.
+- Never expose SSH directly over the public internet.
+- Use UTC internally for timestamps.
+- Include explicit timeouts in all network requests.
+- Include graceful error handling.
+- Use structured logging rather than scattered print statements.
+- Pin Python dependencies.
+- Use type hints where practical.
+- Keep MCU real-time acquisition separate from cloud/network concerns.
+- Do not reboot or reset the modem unless necessary.
+- Do not change the working USB network mode without explaining why.
+- Do not replace working code simply to impose a new framework.
+
+============================================================
+FIRST RESPONSE I WANT FROM YOU
+============================================================
+
+Before writing code, provide:
+
+1. The actual repository tree.
+2. A description of the current end-to-end data flow based on the code.
+3. What is already functional.
+4. What is incomplete.
+5. Technical risks.
+6. Proposed final architecture.
+7. A staged implementation plan.
+8. The files you propose creating or modifying in Stage 1.
+9. Any information or credentials you need from me.
+
+Do not begin implementing Tailscale, Supabase or systemd until the repository assessment is complete and I approve the plan.

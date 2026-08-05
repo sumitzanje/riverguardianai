@@ -1,0 +1,50 @@
+# Environment files
+.env
+.env.*
+!.env.example
+!*.env*.example
+
+# Python virtual environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.cache/
+
+# Local databases and runtime state
+*.sqlite
+*.sqlite3
+*.db
+data/
+
+# Logs
+logs/
+*.log
+
+# Backups and generated temp files
+*.bak
+*.backup
+
+# Local/production settings and secrets
+config/settings.json
+settings.local.json
+settings.production.json
+config/ambient_weather_secrets.json
+secrets/
+credentials/
+
+# Keys and certificates
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+# Editor and OS noise
+.vscode/settings.json
+.DS_Store
+Thumbs.db
+
+# Supabase local tooling artifacts
+supabase/.temp/
