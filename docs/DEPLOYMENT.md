@@ -26,6 +26,37 @@ Production runtime command:
 /home/arduino/riverguardianai/.venv/bin/python /home/arduino/riverguardianai/python/main_runtime.py
 ```
 
+## Device Access Path
+
+- Use Tailscale SSH for remote management.
+- Do not depend on LAN IP addressing for field operations.
+
+## Controlled Deploy Command
+
+```bash
+sudo /usr/local/sbin/riverguardian-deploy v0.1.0
+```
+
+Behavior requirements:
+
+- Deploy only explicit approved tags.
+- Validate before runtime stop.
+- Preserve host-specific state and secrets.
+- Restart service and verify health.
+- Roll back on failed restart/health check.
+
+## Install Artifacts (Review First)
+
+Deployment artifacts live in deploy/ and must be reviewed before installation:
+
+- deploy/riverguardian.service
+- deploy/riverguardian-deploy
+- deploy/riverguardian-dhcp-renew
+- deploy/riverguardian-dhcp-renew.sudoers
+- deploy/install-deployment.sh
+
+Do not install sudoers automatically. Use manual review via visudo.
+
 ## Release Workflow (High Level)
 
 1. Commit and push to private repo.

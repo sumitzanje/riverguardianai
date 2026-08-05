@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+# Fixed-interface DHCP renew wrapper for RiverGuardian modem link.
+INTERFACE="enx024bb3b9ebe5"
+
+if [ "$#" -ne 0 ]; then
+  echo "This command accepts no arguments." >&2
+  exit 64
+fi
+
+exec /sbin/dhclient -v "$INTERFACE"

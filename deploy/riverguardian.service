@@ -1,0 +1,18 @@
+[Unit]
+Description=RiverGuardian AI Runtime
+Wants=network-online.target tailscaled.service
+After=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+User=arduino
+Group=arduino
+WorkingDirectory=/home/arduino/riverguardianai
+EnvironmentFile=-/etc/riverguardian/riverguardian.env
+ExecStart=/home/arduino/riverguardianai/.venv/bin/python /home/arduino/riverguardianai/python/main_runtime.py
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

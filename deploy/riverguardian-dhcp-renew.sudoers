@@ -1,0 +1,3 @@
+# Install with: sudo visudo -f /etc/sudoers.d/riverguardian-dhcp-renew
+# Allow only the fixed DHCP renew wrapper, not arbitrary dhclient invocation.
+arduino ALL=(root) NOPASSWD: /usr/local/sbin/riverguardian-dhcp-renew
