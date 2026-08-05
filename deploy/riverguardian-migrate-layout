@@ -1,13 +1,26 @@
 #!/bin/sh
 set -eu
+umask 077
 
 if [ "$#" -ne 1 ]; then
   echo "Usage: riverguardian-migrate-layout <approved-tag>" >&2
   exit 64
 fi
 
+if [ "$(id -u)" -eq 0 ]; then
+  echo "ERROR: Do not run this migration as root or with sudo." >&2
+  echo "Run it as the arduino user so GitHub deploy-key access and file ownership remain correct." >&2
+  exit 68
+fi
+
+if [ "$(id -un)" != "arduino" ]; then
+  echo "ERROR: Migration must run as user arduino." >&2
+  exit 69
+fi
+
 TAG="$1"
 REPO_URL="git@github-riverguardian:sumitzanje/riverguardianai.git"
+
 LEGACY_DIR="/home/arduino/riverguardianai"
 ROOT_DIR="/home/arduino/riverguardian"
 MIRROR_DIR="$ROOT_DIR/repo-mirror.git"
@@ -16,16 +29,55 @@ SHARED_DIR="$ROOT_DIR/shared"
 STATE_DIR="$ROOT_DIR/state"
 BACKUP_DIR="$ROOT_DIR/migration-backups"
 CURRENT_LINK="$ROOT_DIR/current"
-TS="$(date +%Y%m%d-%H%M%S)"
+
+TS="$(date -u +%Y%m%dT%H%M%SZ)"
+
+case "$TAG" in
+  v[0-9]*.[0-9]*.[0-9]*)
+    ;;
+  *)
+    echo "ERROR: Expected an approved semantic release tag such as v0.1.2." >&2
+    exit 70
+    ;;
+esac
 
 if [ ! -d "$LEGACY_DIR" ]; then
-  echo "ERROR: legacy install not found at $LEGACY_DIR" >&2
+  echo "ERROR: Legacy installation not found: $LEGACY_DIR" >&2
   exit 65
 fi
 
-if [ -e "$CURRENT_LINK" ]; then
-  echo "ERROR: migration already initialized ($CURRENT_LINK exists)." >&2
+if [ -e "$CURRENT_LINK" ] || [ -L "$CURRENT_LINK" ]; then
+  echo "ERROR: Migration is already initialized: $CURRENT_LINK exists." >&2
   exit 66
+fi
+
+if [ ! -f "$LEGACY_DIR/config/settings.json" ]; then
+  echo "ERROR: Missing production config/settings.json." >&2
+  exit 71
+fi
+
+if [ ! -f "$LEGACY_DIR/config/ambient_weather_secrets.json" ]; then
+  echo "ERROR: Missing production config/ambient_weather_secrets.json." >&2
+  exit 72
+fi
+
+if [ ! -x "$LEGACY_DIR/.venv/bin/python" ]; then
+  echo "ERROR: Missing working legacy virtual environment." >&2
+  exit 73
+fi
+
+echo "Checking read-only GitHub access and approved tag: $TAG"
+
+REMOTE_TAGS="$(
+  git ls-remote --tags \
+    "$REPO_URL" \
+    "refs/tags/$TAG" \
+    "refs/tags/$TAG^{}"
+)"
+
+if [ -z "$REMOTE_TAGS" ]; then
+  echo "ERROR: Tag $TAG was not found or GitHub access failed." >&2
+  exit 67
 fi
 
 mkdir -p \
@@ -39,17 +91,40 @@ mkdir -p \
   "$STATE_DIR" \
   "$BACKUP_DIR"
 
-BACKUP_TAR="$BACKUP_DIR/riverguardianai-$TS.tgz"
-tar -C /home/arduino -czf "$BACKUP_TAR" riverguardianai
+chmod 700 \
+  "$ROOT_DIR" \
+  "$RELEASES_DIR" \
+  "$SHARED_DIR" \
+  "$SHARED_DIR/config" \
+  "$SHARED_DIR/data" \
+  "$SHARED_DIR/logs" \
+  "$SHARED_DIR/queues" \
+  "$SHARED_DIR/secrets" \
+  "$SHARED_DIR/credentials" \
+  "$STATE_DIR" \
+  "$BACKUP_DIR"
 
-if [ -f "$LEGACY_DIR/config/settings.json" ]; then
-  cp -a "$LEGACY_DIR/config/settings.json" "$SHARED_DIR/config/settings.json"
-fi
-if [ -f "$LEGACY_DIR/config/ambient_weather_secrets.json" ]; then
-  cp -a "$LEGACY_DIR/config/ambient_weather_secrets.json" "$SHARED_DIR/config/ambient_weather_secrets.json"
-fi
+BACKUP_TAR="$BACKUP_DIR/riverguardianai-$TS.tgz"
+
+echo "Creating migration backup: $BACKUP_TAR"
+tar -C /home/arduino -czf "$BACKUP_TAR" riverguardianai
+chmod 600 "$BACKUP_TAR"
+
+cp -a \
+  "$LEGACY_DIR/config/settings.json" \
+  "$SHARED_DIR/config/settings.json"
+
+cp -a \
+  "$LEGACY_DIR/config/ambient_weather_secrets.json" \
+  "$SHARED_DIR/config/ambient_weather_secrets.json"
+
+chmod 600 \
+  "$SHARED_DIR/config/settings.json" \
+  "$SHARED_DIR/config/ambient_weather_secrets.json"
+
 if [ -f "$LEGACY_DIR/.env" ]; then
   cp -a "$LEGACY_DIR/.env" "$SHARED_DIR/.env"
+  chmod 600 "$SHARED_DIR/.env"
 fi
 
 for dir in data logs queues secrets credentials; do
@@ -58,58 +133,103 @@ for dir in data logs queues secrets credentials; do
   fi
 done
 
-if [ -d "$LEGACY_DIR/.venv" ] && [ ! -d "$SHARED_DIR/venv" ]; then
+if [ ! -x "$SHARED_DIR/venv/bin/python" ]; then
+  rm -rf "$SHARED_DIR/venv"
   cp -a "$LEGACY_DIR/.venv" "$SHARED_DIR/venv"
 fi
 
 if [ ! -x "$SHARED_DIR/venv/bin/python" ]; then
-  echo "WARNING: persistent venv missing at $SHARED_DIR/venv/bin/python" >&2
-  echo "Create it before cutover: python3 -m venv $SHARED_DIR/venv" >&2
+  echo "ERROR: Persistent virtual environment could not be prepared." >&2
+  exit 74
 fi
+
+echo "Preparing local Git mirror."
 
 if [ ! -d "$MIRROR_DIR" ]; then
   git clone --mirror "$REPO_URL" "$MIRROR_DIR"
+else
+  git --git-dir "$MIRROR_DIR" remote set-url origin "$REPO_URL"
 fi
 
 git --git-dir "$MIRROR_DIR" fetch --prune --tags origin
 
 if ! git --git-dir "$MIRROR_DIR" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-  echo "ERROR: tag not found: $TAG" >&2
-  exit 67
+  echo "ERROR: Tag not found after mirror fetch: $TAG" >&2
+  exit 75
 fi
 
-COMMIT="$(git --git-dir "$MIRROR_DIR" rev-list -n 1 "$TAG")"
+COMMIT="$(git --git-dir "$MIRROR_DIR" rev-parse "${TAG}^{}")"
 SHORT_COMMIT="$(printf '%s' "$COMMIT" | cut -c1-12)"
 STAGE_DIR="$RELEASES_DIR/${TAG}-${SHORT_COMMIT}"
 
-if [ -d "$STAGE_DIR" ]; then
-  rm -rf "$STAGE_DIR"
+if [ -e "$STAGE_DIR" ]; then
+  git --git-dir "$MIRROR_DIR" worktree remove --force "$STAGE_DIR" 2>/dev/null ||
+    rm -rf "$STAGE_DIR"
 fi
 
-git --git-dir "$MIRROR_DIR" worktree add --detach "$STAGE_DIR" "$TAG"
+git --git-dir "$MIRROR_DIR" worktree prune
+git --git-dir "$MIRROR_DIR" worktree add --detach "$STAGE_DIR" "$COMMIT"
 
 mkdir -p "$STAGE_DIR/config"
-rm -rf "$STAGE_DIR/data" "$STAGE_DIR/logs" "$STAGE_DIR/queues" "$STAGE_DIR/secrets" "$STAGE_DIR/credentials"
-ln -sfn "$SHARED_DIR/data" "$STAGE_DIR/data"
-ln -sfn "$SHARED_DIR/logs" "$STAGE_DIR/logs"
-ln -sfn "$SHARED_DIR/queues" "$STAGE_DIR/queues"
-ln -sfn "$SHARED_DIR/secrets" "$STAGE_DIR/secrets"
-ln -sfn "$SHARED_DIR/credentials" "$STAGE_DIR/credentials"
 
-rm -f "$STAGE_DIR/config/settings.json"
-ln -sfn "$SHARED_DIR/config/settings.json" "$STAGE_DIR/config/settings.json"
-rm -f "$STAGE_DIR/config/ambient_weather_secrets.json"
-ln -sfn "$SHARED_DIR/config/ambient_weather_secrets.json" "$STAGE_DIR/config/ambient_weather_secrets.json"
-rm -f "$STAGE_DIR/.env"
-ln -sfn "$SHARED_DIR/.env" "$STAGE_DIR/.env"
+rm -rf \
+  "$STAGE_DIR/data" \
+  "$STAGE_DIR/logs" \
+  "$STAGE_DIR/queues" \
+  "$STAGE_DIR/secrets" \
+  "$STAGE_DIR/credentials"
 
-ln -sfn "$STAGE_DIR" "$CURRENT_LINK"
+ln -s "$SHARED_DIR/data" "$STAGE_DIR/data"
+ln -s "$SHARED_DIR/logs" "$STAGE_DIR/logs"
+ln -s "$SHARED_DIR/queues" "$STAGE_DIR/queues"
+ln -s "$SHARED_DIR/secrets" "$STAGE_DIR/secrets"
+ln -s "$SHARED_DIR/credentials" "$STAGE_DIR/credentials"
+
+rm -f \
+  "$STAGE_DIR/config/settings.json" \
+  "$STAGE_DIR/config/ambient_weather_secrets.json" \
+  "$STAGE_DIR/.env"
+
+ln -s \
+  "$SHARED_DIR/config/settings.json" \
+  "$STAGE_DIR/config/settings.json"
+
+ln -s \
+  "$SHARED_DIR/config/ambient_weather_secrets.json" \
+  "$STAGE_DIR/config/ambient_weather_secrets.json"
+
+if [ -f "$SHARED_DIR/.env" ]; then
+  ln -s "$SHARED_DIR/.env" "$STAGE_DIR/.env"
+fi
+
+echo "Validating staged release before activation."
+
+"$SHARED_DIR/venv/bin/python" -m compileall -q "$STAGE_DIR/python"
+
+PYTHONPATH="$STAGE_DIR/python" \
+  "$SHARED_DIR/venv/bin/python" -c \
+  "import api_uploader, connectivity_manager, main_runtime, riverguardian_runtime, runtime_config"
+
+test -r "$STAGE_DIR/config/settings.json"
+test -r "$STAGE_DIR/config/ambient_weather_secrets.json"
+
+TEMP_LINK="$ROOT_DIR/.current-$TS"
+ln -s "$STAGE_DIR" "$TEMP_LINK"
+mv -Tf "$TEMP_LINK" "$CURRENT_LINK"
 
 printf '%s\n' "$LEGACY_DIR" > "$STATE_DIR/legacy_install_path"
 printf '%s\n' "$BACKUP_TAR" > "$STATE_DIR/legacy_backup_tar"
+printf '%s\n' "$TAG" > "$STATE_DIR/current_tag"
+printf '%s\n' "$COMMIT" > "$STATE_DIR/current_commit"
 
-echo "Migration layout prepared."
-echo "Legacy path left untouched: $LEGACY_DIR"
+chmod 600 "$STATE_DIR/"*
+
+echo
+echo "Migration layout prepared successfully."
+echo "Legacy installation remains untouched: $LEGACY_DIR"
 echo "Backup archive: $BACKUP_TAR"
-echo "Current release link: $CURRENT_LINK -> $(readlink "$CURRENT_LINK")"
-echo "Next review step: validate runtime using $CURRENT_LINK before service cutover."
+echo "Release commit: $COMMIT"
+echo "Current release: $CURRENT_LINK -> $(readlink "$CURRENT_LINK")"
+echo
+echo "No systemd service was installed or started."
+echo "Next step: manually validate the current release before service cutover."
