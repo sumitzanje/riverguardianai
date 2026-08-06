@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from alert_manager import AlertManager
-from api_uploader import ApiUploader
+from api_uploader import ApiUploader, json_safe
 from bridge_interface import BridgeInterface
 from confidence_engine import ConfidenceEngine
 from connectivity_manager import ConnectivityManager
@@ -185,7 +185,13 @@ class RiverGuardianRuntime:
                     cycle_output["upload_success"],
                 )
 
-                print(json.dumps(cycle_output, indent=2, allow_nan=False))
+                print(
+                    json.dumps(
+                        json_safe(cycle_output),
+                        indent=2,
+                        allow_nan=False,
+                    )
+                )
 
                 if self.max_cycles is not None and self.cycle_count >= int(self.max_cycles):
                     logging.info("Max runtime cycles reached. Runtime exiting normally.")

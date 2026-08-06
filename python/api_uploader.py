@@ -15,11 +15,32 @@ Future mode:
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 from importlib import import_module
 from dataclasses import dataclass
 from typing import Any, Optional
+
+
+def json_safe(value: Any) -> Any:
+    """Recursively convert non-finite floats to JSON-compatible null values."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+
+    if isinstance(value, dict):
+        return {
+            key: json_safe(item)
+            for key, item in value.items()
+        }
+
+    if isinstance(value, (list, tuple)):
+        return [
+            json_safe(item)
+            for item in value
+        ]
+
+    return value
 
 
 @dataclass
@@ -148,6 +169,10 @@ class ApiUploader:
         }
 
     def upload(self, payload: dict[str, Any]) -> UploadResult:
+        # Supabase/PostgREST requires strict JSON. Preserve unavailable sensor
+        # values as JSON null instead of invalid NaN or infinity tokens.
+        payload = json_safe(payload)
+
         if self.mode == "MOCK":
             return self._mock_upload(payload)
 

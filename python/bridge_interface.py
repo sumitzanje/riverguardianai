@@ -300,28 +300,73 @@ class BridgeInterface:
         return self._validate_packet(raw_packet)
 
     def _read_live_json_line(self) -> dict[str, Any]:
-        """Read one JSON line from active live transport and parse it."""
+        """Read the newest complete JSON packet available from the live transport."""
         if self._socket_connection is not None:
             deadline = time.time() + 5
-            while time.time() < deadline:
+            latest_packet: Optional[dict[str, Any]] = None
+            complete_packet_count = 0
+
+            def consume_complete_lines() -> None:
+                nonlocal latest_packet, complete_packet_count
+
                 while b"\n" in self._socket_buffer:
                     raw, self._socket_buffer = self._socket_buffer.split(b"\n", 1)
                     raw_line = raw.decode("utf-8", errors="replace").strip()
-                    if raw_line:
-                        try:
-                            return json.loads(raw_line)
-                        except json.JSONDecodeError as exc:
-                            raise ValueError(
-                                f"Invalid JSON from monitor endpoint: {raw_line}"
-                            ) from exc
+
+                    if not raw_line:
+                        continue
+
+                    try:
+                        packet = json.loads(raw_line)
+                    except json.JSONDecodeError:
+                        logging.warning(
+                            "Discarding invalid JSON from monitor endpoint: %s",
+                            raw_line,
+                        )
+                        continue
+
+                    latest_packet = packet
+                    complete_packet_count += 1
+
+            while time.time() < deadline:
+                consume_complete_lines()
+
+                # Drain every byte currently waiting in the socket so that an
+                # old packet accumulated during processing is not returned.
+                while True:
+                    try:
+                        data = self._socket_connection.recv(
+                            65536,
+                            socket.MSG_DONTWAIT,
+                        )
+                    except (BlockingIOError, InterruptedError, socket.timeout):
+                        break
+
+                    if not data:
+                        raise RuntimeError(
+                            "Monitor endpoint closed the connection."
+                        )
+
+                    self._socket_buffer += data
+                    consume_complete_lines()
+
+                if latest_packet is not None:
+                    if complete_packet_count > 1:
+                        logging.debug(
+                            "Drained %s queued sensor packets; using newest packet.",
+                            complete_packet_count,
+                        )
+                    return latest_packet
 
                 try:
-                    data = self._socket_connection.recv(4096)
+                    data = self._socket_connection.recv(65536)
                 except socket.timeout:
                     continue
 
                 if not data:
-                    raise RuntimeError("Monitor endpoint closed the connection.")
+                    raise RuntimeError(
+                        "Monitor endpoint closed the connection."
+                    )
 
                 self._socket_buffer += data
 
@@ -330,7 +375,11 @@ class BridgeInterface:
         if self._serial_connection is None:
             raise RuntimeError("Serial connection is not initialized.")
 
-        raw_line = self._serial_connection.readline().decode("utf-8", errors="replace").strip()
+        raw_line = (
+            self._serial_connection.readline()
+            .decode("utf-8", errors="replace")
+            .strip()
+        )
 
         if not raw_line:
             raise ValueError("Received empty serial line.")
@@ -338,7 +387,9 @@ class BridgeInterface:
         try:
             return json.loads(raw_line)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid JSON from Arduino: {raw_line}") from exc
+            raise ValueError(
+                f"Invalid JSON from Arduino: {raw_line}"
+            ) from exc
 
     def _generate_mock_packet(self) -> dict[str, Any]:
         """
