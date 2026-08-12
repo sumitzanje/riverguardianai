@@ -2,6 +2,12 @@
 
 export const dynamic = "force-dynamic";
 
+const SUPABASE_TIMEOUT_MS = 10_000;
+
+const NO_STORE_HEADERS = {
+  "Cache-Control": "no-store, max-age=0, must-revalidate",
+};
+
 const SELECT_FIELDS = [
   "id",
   "created_at",
@@ -47,16 +53,19 @@ export async function GET() {
   const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, "");
   const supabaseKey =
     process.env.SUPABASE_SECRET_KEY ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_KEY;
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !supabaseKey) {
+    console.error("RiverGuardian dashboard backend is missing Supabase configuration.");
+
     return NextResponse.json(
       {
-        error:
-          "Dashboard backend is not configured. SUPABASE_URL and a server-side Supabase key are required.",
+        error: "Dashboard backend is temporarily unavailable.",
       },
-      { status: 503 }
+      {
+        status: 503,
+        headers: NO_STORE_HEADERS,
+      }
     );
   }
 
@@ -73,22 +82,40 @@ export async function GET() {
         Accept: "application/json",
       },
       cache: "no-store",
+      signal: AbortSignal.timeout(SUPABASE_TIMEOUT_MS),
     });
 
     if (!response.ok) {
-      const details = await response.text();
+      console.error("RiverGuardian Supabase request failed.", {
+        status: response.status,
+      });
 
       return NextResponse.json(
         {
-          error: "Supabase request failed.",
-          status: response.status,
-          details,
+          error: "Telemetry service temporarily unavailable.",
         },
-        { status: 502 }
+        {
+          status: 502,
+          headers: NO_STORE_HEADERS,
+        }
       );
     }
 
-    const records = await response.json();
+    const records: unknown = await response.json();
+
+    if (!Array.isArray(records)) {
+      console.error("RiverGuardian Supabase returned an unexpected response.");
+
+      return NextResponse.json(
+        {
+          error: "Telemetry service returned an invalid response.",
+        },
+        {
+          status: 502,
+          headers: NO_STORE_HEADERS,
+        }
+      );
+    }
 
     return NextResponse.json(
       {
@@ -96,18 +123,29 @@ export async function GET() {
         records,
       },
       {
-        headers: {
-          "Cache-Control": "no-store, max-age=0",
-        },
+        headers: NO_STORE_HEADERS,
       }
     );
   } catch (error) {
+    const timedOut =
+      error instanceof DOMException && error.name === "TimeoutError";
+
+    console.error(
+      timedOut
+        ? "RiverGuardian Supabase request timed out."
+        : "RiverGuardian Supabase request failed unexpectedly."
+    );
+
     return NextResponse.json(
       {
-        error: "Dashboard backend could not reach Supabase.",
-        details: error instanceof Error ? error.message : String(error),
+        error: timedOut
+          ? "Telemetry service timed out."
+          : "Telemetry service temporarily unavailable.",
       },
-      { status: 502 }
+      {
+        status: timedOut ? 504 : 502,
+        headers: NO_STORE_HEADERS,
+      }
     );
   }
 }
