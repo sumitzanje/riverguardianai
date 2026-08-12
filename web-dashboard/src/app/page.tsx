@@ -39,8 +39,8 @@ type DisplayState =
   | "OFFLINE";
 
 const POLL_MS = 5000;
-const LIVE_SECONDS = 20;
-const OFFLINE_SECONDS = 90;
+const LIVE_SECONDS = 75;
+const OFFLINE_SECONDS = 180;
 
 function finite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -665,5 +665,6 @@ export default function Dashboard() {
     </main>
   );
 }
+
 
 
