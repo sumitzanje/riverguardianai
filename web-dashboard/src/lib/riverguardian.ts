@@ -1,0 +1,45 @@
+﻿export type RiverGuardianEvent = {
+  id: number;
+  created_at: string;
+  local_record_id: number | null;
+  device_id: string | null;
+  site_id: string | null;
+  node_id: string;
+  distance_cm: number | null;
+  raw_distance_cm: number | null;
+  accepted_distance_cm: number | null;
+  candidate_distance_cm: number | null;
+  sensor_status: string | null;
+  measurement_state: string | null;
+  sensor_error: string | null;
+  packet_sequence: number | null;
+  fw_profile: string | null;
+  fw_build: string | null;
+  clearance_cm: number | null;
+  rise_rate_cm_min: number | null;
+  rise_acceleration_cm_min2: number | null;
+  time_to_unsafe_min: number | null;
+  base_risk: string | null;
+  fused_risk: string | null;
+  rainfall_class: string | null;
+  rain_hourly_mm: number | null;
+  rain_daily_mm: number | null;
+  confidence_score: number | null;
+  confidence_level: string | null;
+  recommendation_status: string | null;
+  public_message: string | null;
+  technical_summary: string | null;
+  action_level: string | null;
+  dashboard_priority: string | null;
+  alert_should_send: boolean;
+  alert_type: string | null;
+  alert_reason: string | null;
+  alert_message: string | null;
+  source: string | null;
+  payload_version: string | null;
+};
+
+export type DashboardResponse = {
+  generated_at: string;
+  records: RiverGuardianEvent[];
+};
