@@ -1,0 +1,8 @@
+[Unit]
+Description=RiverGuardian LTE/Wi-Fi Network Failover Check
+After=network-online.target NetworkManager.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/riverguardian-network-failover
