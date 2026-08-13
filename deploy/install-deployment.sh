@@ -12,6 +12,9 @@ fi
 install -o root -g root -m 0755 deploy/riverguardian-deploy /usr/local/sbin/riverguardian-deploy
 install -o root -g root -m 0755 deploy/riverguardian-migrate-layout /usr/local/sbin/riverguardian-migrate-layout
 install -o root -g root -m 0755 deploy/riverguardian-dhcp-renew /usr/local/sbin/riverguardian-dhcp-renew
+install -o root -g root -m 0755 deploy/riverguardian-network-failover /usr/local/sbin/riverguardian-network-failover
+install -o root -g root -m 0644 deploy/riverguardian-network-failover.service /etc/systemd/system/riverguardian-network-failover.service
+install -o root -g root -m 0644 deploy/riverguardian-network-failover.timer /etc/systemd/system/riverguardian-network-failover.timer
 install -o root -g root -m 0644 deploy/riverguardian.service /etc/systemd/system/riverguardian.service
 
 echo "Next manual step (not performed by this script):"
@@ -22,6 +25,7 @@ echo
 echo "After sudoers is installed, run:"
 echo "  sudo systemctl daemon-reload"
 echo "  sudo systemctl enable riverguardian.service"
+echo "  sudo systemctl enable --now riverguardian-network-failover.timer"
 echo "  sudo systemctl restart riverguardian.service"
 echo
 echo "Before first deployment on a host currently using /home/arduino/riverguardianai:"

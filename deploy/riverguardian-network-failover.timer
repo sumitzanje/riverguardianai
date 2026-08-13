@@ -1,0 +1,11 @@
+[Unit]
+Description=Run RiverGuardian Network Failover Check
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=30s
+AccuracySec=5s
+Unit=riverguardian-network-failover.service
+
+[Install]
+WantedBy=timers.target

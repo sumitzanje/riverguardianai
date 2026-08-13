@@ -1,0 +1,96 @@
+#!/bin/sh
+set -eu
+
+LTE_IF="${RIVERGUARDIAN_LTE_IF:-enx024bb3b9ebe5}"
+HEALTH_URL="${RIVERGUARDIAN_HEALTH_URL:-https://api.ipify.org}"
+PRIMARY_METRIC="${RIVERGUARDIAN_LTE_PRIMARY_METRIC:-100}"
+DEGRADED_METRIC="${RIVERGUARDIAN_LTE_DEGRADED_METRIC:-700}"
+LTE_GATEWAY="${RIVERGUARDIAN_LTE_GATEWAY:-10.187.171.1}"
+
+STATE_DIR="/run/riverguardian-network"
+GATEWAY_FILE="$STATE_DIR/lte-gateway"
+
+mkdir -p "$STATE_DIR"
+
+log() {
+    logger -t riverguardian-network -- "$*"
+}
+
+if [ ! -d "/sys/class/net/$LTE_IF" ]; then
+    log "state=missing iface=$LTE_IF"
+    exit 0
+fi
+
+route_line="$(ip -4 route show default dev "$LTE_IF" | head -n 1 || true)"
+
+gateway="$(
+    printf '%s\n' "$route_line" |
+    awk '{for (i=1; i<=NF; i++) if ($i=="via") {print $(i+1); exit}}'
+)"
+
+if [ -n "$gateway" ]; then
+    printf '%s\n' "$gateway" > "$GATEWAY_FILE"
+elif [ -s "$GATEWAY_FILE" ]; then
+    gateway="$(cat "$GATEWAY_FILE")"
+elif [ -n "$LTE_GATEWAY" ]; then
+    gateway="$LTE_GATEWAY"
+fi
+
+if [ -n "$gateway" ]; then
+    printf '%s\n' "$gateway" > "$GATEWAY_FILE"
+fi
+
+if [ -z "$gateway" ]; then
+    log "state=no_gateway iface=$LTE_IF"
+    exit 0
+fi
+
+# Keep a degraded LTE route available so LTE can be probed while Wi-Fi
+# is carrying normal traffic.
+if [ -z "$route_line" ]; then
+    ip -4 route add default via "$gateway" dev "$LTE_IF" metric "$DEGRADED_METRIC" 2>/dev/null || true
+    route_line="$(ip -4 route show default dev "$LTE_IF" | head -n 1 || true)"
+fi
+
+if curl -4 \
+    --interface "$LTE_IF" \
+    --connect-timeout 4 \
+    --max-time 8 \
+    --fail \
+    --silent \
+    --output /dev/null \
+    "$HEALTH_URL"
+then
+    desired_metric="$PRIMARY_METRIC"
+    health_state="healthy"
+else
+    desired_metric="$DEGRADED_METRIC"
+    health_state="degraded"
+fi
+
+current_metric="$(
+    printf '%s\n' "$route_line" |
+    awk '{
+        for (i=1; i<=NF; i++) {
+            if ($i=="metric") {
+                print $(i+1)
+                exit
+            }
+        }
+    }'
+)"
+
+# A route with no explicit metric behaves as metric 0.
+current_metric="${current_metric:-0}"
+
+if [ "$current_metric" != "$desired_metric" ]; then
+    while ip -4 route del default dev "$LTE_IF" 2>/dev/null; do
+        :
+    done
+
+    ip -4 route add default via "$gateway" dev "$LTE_IF" metric "$desired_metric"
+
+    log "state=$health_state iface=$LTE_IF gateway=$gateway metric=$desired_metric"
+fi
+
+exit 0
